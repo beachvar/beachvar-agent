@@ -5,10 +5,12 @@
 # 1. Crie o diretório: sudo mkdir -p /etc/beachvar
 # 2. Copie este arquivo: sudo cp docker-compose.example.yml /etc/beachvar/docker-compose.yml
 # 3. Crie o .env: sudo nano /etc/beachvar/.env
-# 4. Inicie: cd /etc/beachvar && docker compose up -d
+# 4. Inicie apenas o agent: cd /etc/beachvar && docker compose up -d agent
+#    (O agent vai iniciar o device automaticamente)
 
 services:
   # BeachVar Device - Main application
+  # Gerenciado automaticamente pelo agent
   device:
     image: ghcr.io/beachvar/beachvar-device:latest
     container_name: beachvar-device
@@ -26,6 +28,11 @@ services:
     network_mode: host
 
   # BeachVar Agent - Auto-updater
+  # Inicie apenas este: docker compose up -d agent
+  # Ele vai automaticamente:
+  # - Fazer pull das imagens
+  # - Iniciar o device
+  # - Monitorar atualizações
   agent:
     image: ghcr.io/beachvar/beachvar-agent:latest
     container_name: beachvar-agent
@@ -42,8 +49,6 @@ services:
       # Version tracking
       - beachvar-versions:/etc/beachvar-agent
     restart: unless-stopped
-    depends_on:
-      - device
 
 volumes:
   beachvar-versions:

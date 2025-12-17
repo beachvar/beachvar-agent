@@ -191,21 +191,84 @@ class Updater:
 
         return updated
 
+    def bootstrap(self) -> bool:
+        """
+        Bootstrap the device on first run.
+
+        - Login to registry
+        - Pull images
+        - Start device container if not running
+
+        Returns:
+            True if bootstrap was successful
+        """
+        logger.info("=== Bootstrap: Initializing BeachVar Device ===")
+
+        # Get registry token and login
+        if not self._get_registry_token():
+            logger.error("Bootstrap: Failed to get registry token")
+            return False
+
+        # Check if compose file exists
+        if not self.compose_file.exists():
+            logger.error(f"Bootstrap: Compose file not found at {self.compose_file}")
+            return False
+
+        # Check if device is already running
+        if self.docker.is_container_running("beachvar-device"):
+            logger.info("Bootstrap: Device container is already running")
+        else:
+            logger.info("Bootstrap: Device container not running, starting...")
+
+            # Pull images first
+            logger.info("Bootstrap: Pulling images...")
+            if not self.docker.compose_pull(self.compose_file, "device"):
+                logger.warning("Bootstrap: Failed to pull device image, will try to start anyway")
+
+            # Start device container
+            if not self.docker.compose_up(self.compose_file, "device"):
+                logger.error("Bootstrap: Failed to start device container")
+                return False
+
+            logger.info("Bootstrap: Device container started successfully")
+
+        # Get current digests and save
+        device_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-device", "latest")
+        agent_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-agent", "latest")
+
+        if device_digest:
+            self.versions["device"] = device_digest
+        if agent_digest:
+            self.versions["agent"] = agent_digest
+
+        self._save_versions()
+
+        # Report versions to backend
+        self.backend.report_version(
+            device_version=device_digest,
+            agent_version=agent_digest,
+        )
+
+        logger.info("=== Bootstrap complete ===")
+        return True
+
     def run(self):
         """Run the updater in a loop."""
         logger.info("BeachVar Agent starting...")
         logger.info(f"Check interval: {CHECK_INTERVAL_SECONDS} seconds")
         logger.info(f"Compose file: {COMPOSE_FILE_PATH}")
 
-        # Report initial versions
-        self._get_registry_token()
-        self.backend.report_version(
-            device_version=self.versions.get("device"),
-            agent_version=self.versions.get("agent"),
-        )
+        # Bootstrap: ensure device is running
+        if not self.bootstrap():
+            logger.error("Bootstrap failed, will retry in next cycle")
 
         while True:
             try:
+                # Check if device is still running, restart if needed
+                if not self.docker.is_container_running("beachvar-device"):
+                    logger.warning("Device container is not running, restarting...")
+                    self.docker.compose_up(self.compose_file, "device")
+
                 self.run_once()
             except Exception as e:
                 logger.error(f"Error in update cycle: {e}")

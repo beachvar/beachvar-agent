@@ -4,9 +4,11 @@ Serviço de auto-atualização para dispositivos BeachVar. Monitora o GitHub Con
 
 ## Funcionalidades
 
+- **Bootstrap automático**: Ao iniciar, faz pull das imagens e inicia o device automaticamente
 - Verifica periodicamente novas versões das imagens Docker
 - Atualiza automaticamente o `beachvar-device`
 - Auto-atualização do próprio agent
+- Reinicia automaticamente o device se ele parar
 - Reporta versões ao backend para monitoramento
 - Obtém token do registry dinamicamente do backend
 
@@ -99,20 +101,24 @@ services:
       - /etc/beachvar:/etc/beachvar:ro
       - beachvar-versions:/etc/beachvar-agent
     restart: unless-stopped
-    depends_on:
-      - device
 
 volumes:
   beachvar-versions:
 ```
 
-### 5. Iniciar os serviços
+### 5. Iniciar apenas o agent (ele inicia o device automaticamente)
 
 ```bash
 cd /etc/beachvar
-sudo docker compose pull
-sudo docker compose up -d
+sudo docker compose pull agent
+sudo docker compose up -d agent
 ```
+
+O agent vai automaticamente:
+1. Fazer login no registry
+2. Fazer pull da imagem do device
+3. Iniciar o container do device
+4. Monitorar atualizações
 
 ### 6. Verificar status
 
@@ -197,9 +203,13 @@ cd /etc/beachvar && sudo docker compose pull && sudo docker compose up -d
 
 1. Agent inicia e obtém token do registry via `/api/device/registry-token/`
 2. Faz login no ghcr.io com o token
-3. A cada 5 minutos, verifica se há novas versões
-4. Se houver, faz pull e reinicia o container
-5. Reporta versões ao backend via `/api/device/version/`
+3. **Bootstrap**: Verifica se o device está rodando, se não:
+   - Faz pull da imagem do device
+   - Inicia o container do device
+4. A cada 5 minutos, verifica se há novas versões
+5. Se houver, faz pull e reinicia o container
+6. Se o device parar por qualquer motivo, reinicia automaticamente
+7. Reporta versões ao backend via `/api/device/version/`
 
 ## Desenvolvimento
 

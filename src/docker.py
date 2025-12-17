@@ -220,3 +220,73 @@ class DockerClient:
             logger.error(f"Error restarting service: {e}")
 
         return False
+
+    def is_container_running(self, container_name: str) -> bool:
+        """
+        Check if a container is running.
+
+        Args:
+            container_name: Name of the container
+
+        Returns:
+            True if running
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return result.returncode == 0 and result.stdout.strip() == "true"
+        except Exception as e:
+            logger.debug(f"Error checking container: {e}")
+            return False
+
+    def container_exists(self, container_name: str) -> bool:
+        """
+        Check if a container exists (running or stopped).
+
+        Args:
+            container_name: Name of the container
+
+        Returns:
+            True if exists
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", container_name],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def start_container(self, container_name: str) -> bool:
+        """
+        Start an existing container.
+
+        Args:
+            container_name: Name of the container
+
+        Returns:
+            True if successful
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "start", container_name],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode == 0:
+                logger.info(f"Container {container_name} started")
+                return True
+            else:
+                logger.error(f"Start failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error starting container: {e}")
+
+        return False
