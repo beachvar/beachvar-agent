@@ -24,7 +24,7 @@ class BackendClient:
             self._http_client = httpx.Client(
                 timeout=30.0,
                 headers={
-                    "Authorization": f"DeviceToken {self.device_token}",
+                    "X-Device-Token": self.device_token,
                     "Content-Type": "application/json",
                 },
             )
@@ -38,7 +38,7 @@ class BackendClient:
             GitHub token or None if failed
         """
         try:
-            response = self._client.get(f"{self.base_url}/api/device/registry-token/")
+            response = self._client.get(f"{self.base_url}/api/v1/device/registry-token/")
             if response.status_code == 200:
                 data = response.json()
                 return data.get("token")
@@ -76,7 +76,7 @@ class BackendClient:
                 payload["agent_version"] = agent_version
 
             response = self._client.post(
-                f"{self.base_url}/api/device/version/",
+                f"{self.base_url}/api/v1/device/version/",
                 json=payload,
             )
             if response.status_code in (200, 201):
