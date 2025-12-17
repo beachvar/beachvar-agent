@@ -1,0 +1,222 @@
+"""
+Docker operations for BeachVar Agent.
+"""
+
+import json
+import logging
+import subprocess
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+class DockerClient:
+    """Client for Docker operations."""
+
+    def __init__(self):
+        self._check_docker()
+
+    def _check_docker(self):
+        """Check if Docker is available."""
+        try:
+            result = subprocess.run(
+                ["docker", "version", "--format", "{{.Server.Version}}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                raise RuntimeError("Docker is not running")
+            logger.debug(f"Docker version: {result.stdout.strip()}")
+        except FileNotFoundError:
+            raise RuntimeError("Docker is not installed")
+
+    def login(self, registry: str, username: str, password: str) -> bool:
+        """
+        Login to a Docker registry.
+
+        Args:
+            registry: Registry URL (e.g., "ghcr.io")
+            username: Username
+            password: Password/token
+
+        Returns:
+            True if successful
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "login", registry, "-u", username, "--password-stdin"],
+                input=password,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                logger.info(f"Logged in to {registry}")
+                return True
+            else:
+                logger.error(f"Login failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error logging in: {e}")
+
+        return False
+
+    def get_local_image_digest(self, image: str, tag: str = "latest") -> str | None:
+        """
+        Get the digest of a local image.
+
+        Args:
+            image: Image name
+            tag: Image tag
+
+        Returns:
+            Image digest or None if not found
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "images", "--digests", "--format", "{{.Digest}}", f"{image}:{tag}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                digest = result.stdout.strip()
+                if digest and digest != "<none>":
+                    return digest
+        except Exception as e:
+            logger.error(f"Error getting local digest: {e}")
+
+        return None
+
+    def pull_image(self, image: str, tag: str = "latest") -> bool:
+        """
+        Pull an image from registry.
+
+        Args:
+            image: Image name
+            tag: Image tag
+
+        Returns:
+            True if successful
+        """
+        try:
+            logger.info(f"Pulling {image}:{tag}...")
+            result = subprocess.run(
+                ["docker", "pull", f"{image}:{tag}"],
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minutes max
+            )
+            if result.returncode == 0:
+                logger.info(f"Successfully pulled {image}:{tag}")
+                return True
+            else:
+                logger.error(f"Pull failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error pulling image: {e}")
+
+        return False
+
+    def compose_up(self, compose_file: Path, service: str | None = None) -> bool:
+        """
+        Run docker compose up for a service.
+
+        Args:
+            compose_file: Path to docker-compose.yml
+            service: Service name (optional, default all)
+
+        Returns:
+            True if successful
+        """
+        try:
+            cmd = ["docker", "compose", "-f", str(compose_file), "up", "-d"]
+            if service:
+                cmd.append(service)
+
+            logger.info(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes
+                cwd=compose_file.parent,
+            )
+            if result.returncode == 0:
+                logger.info("Compose up successful")
+                return True
+            else:
+                logger.error(f"Compose up failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error running compose: {e}")
+
+        return False
+
+    def compose_pull(self, compose_file: Path, service: str | None = None) -> bool:
+        """
+        Run docker compose pull for a service.
+
+        Args:
+            compose_file: Path to docker-compose.yml
+            service: Service name (optional, default all)
+
+        Returns:
+            True if successful
+        """
+        try:
+            cmd = ["docker", "compose", "-f", str(compose_file), "pull"]
+            if service:
+                cmd.append(service)
+
+            logger.info(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minutes
+                cwd=compose_file.parent,
+            )
+            if result.returncode == 0:
+                logger.info("Compose pull successful")
+                return True
+            else:
+                logger.error(f"Compose pull failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error running compose pull: {e}")
+
+        return False
+
+    def restart_service(self, compose_file: Path, service: str) -> bool:
+        """
+        Restart a docker compose service.
+
+        Args:
+            compose_file: Path to docker-compose.yml
+            service: Service name
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Pull first
+            if not self.compose_pull(compose_file, service):
+                return False
+
+            # Then recreate
+            cmd = ["docker", "compose", "-f", str(compose_file), "up", "-d", "--force-recreate", service]
+            logger.info(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=compose_file.parent,
+            )
+            if result.returncode == 0:
+                logger.info(f"Service {service} restarted")
+                return True
+            else:
+                logger.error(f"Restart failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error restarting service: {e}")
+
+        return False

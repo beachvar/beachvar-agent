@@ -1,0 +1,13 @@
+[project]
+name = "beachvar-agent"
+version = "0.1.0"
+description = "BeachVar Device Agent - Auto-update and management"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

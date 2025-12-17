@@ -1,0 +1,49 @@
+# BeachVar Device - Docker Compose
+# Este arquivo deve ser copiado para /etc/beachvar/docker-compose.yml no device
+#
+# Instalação:
+# 1. Crie o diretório: sudo mkdir -p /etc/beachvar
+# 2. Copie este arquivo: sudo cp docker-compose.example.yml /etc/beachvar/docker-compose.yml
+# 3. Crie o .env: sudo nano /etc/beachvar/.env
+# 4. Inicie: cd /etc/beachvar && docker compose up -d
+
+services:
+  # BeachVar Device - Main application
+  device:
+    image: ghcr.io/beachvar/beachvar-device:latest
+    container_name: beachvar-device
+    command: python -O main.py
+    env_file:
+      - .env
+    environment:
+      - SSH_HOST=localhost
+      - SSH_USER=device
+      - SSH_PORT=22
+      - SSH_KEY_PATH=/ssh/id_ed25519
+    volumes:
+      - /etc/beachvar/ssh_key:/ssh/id_ed25519.mount:ro
+    restart: unless-stopped
+    network_mode: host
+
+  # BeachVar Agent - Auto-updater
+  agent:
+    image: ghcr.io/beachvar/beachvar-agent:latest
+    container_name: beachvar-agent
+    env_file:
+      - .env
+    environment:
+      - CHECK_INTERVAL_SECONDS=300
+      - COMPOSE_FILE_PATH=/etc/beachvar/docker-compose.yml
+    volumes:
+      # Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Compose file location
+      - /etc/beachvar:/etc/beachvar:ro
+      # Version tracking
+      - beachvar-versions:/etc/beachvar-agent
+    restart: unless-stopped
+    depends_on:
+      - device
+
+volumes:
+  beachvar-versions:
