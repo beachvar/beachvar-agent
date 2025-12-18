@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import (
     CHECK_INTERVAL_SECONDS,
     COMPOSE_FILE_PATH,
+    DEBUG,
     DEVICE_IMAGE,
     AGENT_IMAGE,
     GHCR_REGISTRY,
@@ -260,6 +261,8 @@ class Updater:
     def run(self):
         """Run the updater in a loop."""
         logger.info("BeachVar Agent starting...")
+        if DEBUG:
+            logger.info("DEBUG MODE: Using faster update check interval (30s)")
         logger.info(f"Check interval: {CHECK_INTERVAL_SECONDS} seconds")
         logger.info(f"Compose file: {COMPOSE_FILE_PATH}")
 
