@@ -54,65 +54,69 @@ class Updater:
         except Exception as e:
             logger.error(f"Error saving versions: {e}")
 
-    def _get_registry_token(self) -> bool:
-        """Get registry token from backend and configure docker."""
+    def _setup_registry_auth(self) -> bool:
+        """Setup registry authentication using token from backend."""
         token = self.backend.get_registry_token()
         if not token:
-            logger.error("Failed to get registry token")
+            logger.error("Failed to get registry token from backend")
             return False
 
+        # Set token for registry API calls
         self.registry.set_token(token)
 
-        # Login to Docker
+        # Login to Docker for pull operations
         if not self.docker.login(GHCR_REGISTRY, GHCR_USER, token):
             logger.error("Failed to login to Docker registry")
             return False
 
         return True
 
-    def check_device_update(self) -> bool:
+    def check_device_update(self) -> str | None:
         """
         Check if beachvar-device needs update.
 
         Returns:
-            True if update is available
+            New digest if update is available, None otherwise
         """
         remote_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-device", "latest")
         if not remote_digest:
             logger.warning("Could not get remote device digest")
-            return False
+            return None
 
         local_digest = self.versions.get("device")
         if local_digest != remote_digest:
             logger.info(f"Device update available: {local_digest} -> {remote_digest}")
-            return True
+            return remote_digest
 
         logger.debug("Device is up to date")
-        return False
+        return None
 
-    def check_agent_update(self) -> bool:
+    def check_agent_update(self) -> str | None:
         """
         Check if beachvar-agent needs update.
 
         Returns:
-            True if update is available
+            New digest if update is available, None otherwise
         """
         remote_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-agent", "latest")
         if not remote_digest:
             logger.warning("Could not get remote agent digest")
-            return False
+            return None
 
         local_digest = self.versions.get("agent")
         if local_digest != remote_digest:
             logger.info(f"Agent update available: {local_digest} -> {remote_digest}")
-            return True
+            return remote_digest
 
         logger.debug("Agent is up to date")
-        return False
+        return None
 
-    def update_device(self) -> bool:
+    def update_device(self, new_digest: str) -> bool:
         """
         Update beachvar-device container.
+
+        Args:
+            new_digest: The new digest to update to
 
         Returns:
             True if successful
@@ -128,18 +132,19 @@ class Updater:
             return False
 
         # Update version
-        new_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-device", "latest")
-        if new_digest:
-            self.versions["device"] = new_digest
-            self._save_versions()
-            self.backend.report_version(device_version=new_digest)
+        self.versions["device"] = new_digest
+        self._save_versions()
+        self.backend.report_version(device_version=new_digest)
 
         logger.info("Device updated successfully")
         return True
 
-    def update_agent(self) -> bool:
+    def update_agent(self, new_digest: str) -> bool:
         """
         Update beachvar-agent (self-update).
+
+        Args:
+            new_digest: The new digest to update to
 
         Returns:
             True if successful (will restart after)
@@ -151,11 +156,9 @@ class Updater:
             return False
 
         # Update version before restart
-        new_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-agent", "latest")
-        if new_digest:
-            self.versions["agent"] = new_digest
-            self._save_versions()
-            self.backend.report_version(agent_version=new_digest)
+        self.versions["agent"] = new_digest
+        self._save_versions()
+        self.backend.report_version(agent_version=new_digest)
 
         # Restart self (will be recreated with new image)
         logger.info("Agent update complete - restarting...")
@@ -173,20 +176,22 @@ class Updater:
         Returns:
             True if any update was applied
         """
-        # Get registry token
-        if not self._get_registry_token():
+        # Setup registry authentication first
+        if not self._setup_registry_auth():
             return False
 
         updated = False
 
         # Check and update device first
-        if self.check_device_update():
-            if self.update_device():
+        device_digest = self.check_device_update()
+        if device_digest:
+            if self.update_device(device_digest):
                 updated = True
 
         # Check and update agent (self)
-        if self.check_agent_update():
-            if self.update_agent():
+        agent_digest = self.check_agent_update()
+        if agent_digest:
+            if self.update_agent(agent_digest):
                 updated = True
 
         return updated
@@ -204,9 +209,9 @@ class Updater:
         """
         logger.info("=== Bootstrap: Initializing BeachVar Device ===")
 
-        # Get registry token and login
-        if not self._get_registry_token():
-            logger.error("Bootstrap: Failed to get registry token")
+        # Setup registry authentication
+        if not self._setup_registry_auth():
+            logger.error("Bootstrap: Failed to setup registry authentication")
             return False
 
         # Check if compose file exists
