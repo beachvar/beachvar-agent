@@ -333,26 +333,30 @@ class Updater:
         """
         Check if all containers are running and start them if not.
 
+        Only starts individual containers that are down, never runs
+        'docker compose up -d' without specifying services (which would
+        recreate the agent container itself).
+
         Returns:
             True if all containers are now running
         """
-        # Check if the main containers are running
-        device_running = self.docker.is_container_running("beachvar-device")
-        cloudflared_running = self.docker.is_container_running("beachvar-cloudflared")
-        ttyd_running = self.docker.is_container_running("beachvar-ttyd")
+        all_running = True
 
-        if device_running and cloudflared_running and ttyd_running:
-            return True
+        # Check and start each container individually (except agent)
+        containers = [
+            ("beachvar-device", "device"),
+            ("beachvar-cloudflared", "cloudflared"),
+            ("beachvar-ttyd", "ttyd"),
+        ]
 
-        if not device_running:
-            logger.warning("Device container is not running")
-        if not cloudflared_running:
-            logger.warning("Cloudflared container is not running")
-        if not ttyd_running:
-            logger.warning("TTYD container is not running")
+        for container_name, service_name in containers:
+            if not self.docker.is_container_running(container_name):
+                logger.warning(f"{container_name} is not running, starting...")
+                if not self.docker.compose_up(self.compose_file, service_name):
+                    logger.error(f"Failed to start {service_name}")
+                    all_running = False
 
-        logger.info("Starting all containers...")
-        return self.docker.compose_up(self.compose_file)
+        return all_running
 
     def run(self):
         """Run the updater with two loops: fast health check, slow update check."""
