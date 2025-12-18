@@ -108,6 +108,29 @@ class Updater:
 
         return False
 
+    def _get_remote_digest_with_auth_fallback(self, image: str, tag: str = "latest") -> str | None:
+        """
+        Get remote image digest, trying without auth first, then with auth.
+
+        Args:
+            image: Image name
+            tag: Image tag
+
+        Returns:
+            Image digest or None if failed
+        """
+        # Try without explicit auth first (uses cached credentials if any)
+        remote_digest = self.docker.get_remote_image_digest(image, tag)
+        if remote_digest:
+            return remote_digest
+
+        # If that failed, try with fresh authentication
+        logger.info("Digest check failed, trying with fresh authentication...")
+        if self._ensure_registry_auth():
+            return self.docker.get_remote_image_digest(image, tag)
+
+        return None
+
     def check_device_update(self) -> str | None:
         """
         Check if beachvar-device needs update using docker manifest inspect.
@@ -115,7 +138,7 @@ class Updater:
         Returns:
             New digest if update is available, None otherwise
         """
-        remote_digest = self.docker.get_remote_image_digest(DEVICE_IMAGE, "latest")
+        remote_digest = self._get_remote_digest_with_auth_fallback(DEVICE_IMAGE, "latest")
         if not remote_digest:
             logger.warning("Could not get remote device digest")
             return None
@@ -135,7 +158,7 @@ class Updater:
         Returns:
             New digest if update is available, None otherwise
         """
-        remote_digest = self.docker.get_remote_image_digest(AGENT_IMAGE, "latest")
+        remote_digest = self._get_remote_digest_with_auth_fallback(AGENT_IMAGE, "latest")
         if not remote_digest:
             logger.warning("Could not get remote agent digest")
             return None
