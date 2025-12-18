@@ -2,6 +2,7 @@
 Docker operations for BeachVar Agent.
 """
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -293,7 +294,10 @@ class DockerClient:
 
     def get_remote_image_digest(self, image: str, tag: str = "latest") -> str | None:
         """
-        Get the digest of a remote image using docker manifest inspect.
+        Get the digest of a remote image using docker buildx imagetools inspect.
+
+        This method uses buildx imagetools which doesn't cache manifests,
+        ensuring we always get the latest digest from the registry.
 
         Args:
             image: Image name (e.g., "ghcr.io/beachvar/beachvar-device")
@@ -301,6 +305,33 @@ class DockerClient:
 
         Returns:
             Image digest (sha256:...) or None if not found
+        """
+        try:
+            # Use docker buildx imagetools inspect - no cache issues
+            result = subprocess.run(
+                ["docker", "buildx", "imagetools", "inspect", f"{image}:{tag}", "--raw"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                # The raw output is the manifest itself - hash it to get digest
+                manifest_content = result.stdout.strip()
+                digest = "sha256:" + hashlib.sha256(manifest_content.encode()).hexdigest()
+                logger.debug(f"Remote digest for {image}:{tag}: {digest}")
+                return digest
+            else:
+                # Fallback to docker manifest inspect if buildx not available
+                logger.debug(f"Buildx failed, trying manifest inspect: {result.stderr.strip()}")
+                return self._get_remote_image_digest_fallback(image, tag)
+        except Exception as e:
+            logger.error(f"Error getting remote digest: {e}")
+            return self._get_remote_image_digest_fallback(image, tag)
+
+    def _get_remote_image_digest_fallback(self, image: str, tag: str = "latest") -> str | None:
+        """
+        Fallback method using docker manifest inspect.
+        Note: This may use cached manifests.
         """
         try:
             result = subprocess.run(
@@ -325,6 +356,6 @@ class DockerClient:
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing manifest JSON: {e}")
         except Exception as e:
-            logger.error(f"Error getting remote digest: {e}")
+            logger.error(f"Error getting remote digest (fallback): {e}")
 
         return None
