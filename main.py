@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 BeachVar Agent - Auto-update service for BeachVar devices.
+
+Monitors for updates and manages container lifecycle.
 """
 
 import logging
