@@ -202,7 +202,7 @@ class Updater:
         Bootstrap the device on first run.
 
         - Login to registry
-        - Pull images
+        - Check for updates and apply them
         - Start device container if not running
 
         Returns:
@@ -220,39 +220,49 @@ class Updater:
             logger.error(f"Bootstrap: Compose file not found at {self.compose_file}")
             return False
 
-        # Check if device is already running
-        if self.docker.is_container_running("beachvar-device"):
-            logger.info("Bootstrap: Device container is already running")
+        # Always check for device updates first
+        logger.info("Bootstrap: Checking for device updates...")
+        device_digest = self.check_device_update()
+        if device_digest:
+            logger.info("Bootstrap: Device update available, applying...")
+            if self.update_device(device_digest):
+                logger.info("Bootstrap: Device updated successfully")
+            else:
+                logger.warning("Bootstrap: Failed to update device")
         else:
-            logger.info("Bootstrap: Device container not running, starting...")
+            # No update needed, but ensure device is running
+            if not self.docker.is_container_running("beachvar-device"):
+                logger.info("Bootstrap: Device container not running, starting...")
 
-            # Pull images first
-            logger.info("Bootstrap: Pulling images...")
-            if not self.docker.compose_pull(self.compose_file, "device"):
-                logger.warning("Bootstrap: Failed to pull device image, will try to start anyway")
+                # Pull images first
+                logger.info("Bootstrap: Pulling images...")
+                if not self.docker.compose_pull(self.compose_file, "device"):
+                    logger.warning("Bootstrap: Failed to pull device image, will try to start anyway")
 
-            # Start device container
-            if not self.docker.compose_up(self.compose_file, "device"):
-                logger.error("Bootstrap: Failed to start device container")
-                return False
+                # Start device container
+                if not self.docker.compose_up(self.compose_file, "device"):
+                    logger.error("Bootstrap: Failed to start device container")
+                    return False
 
-            logger.info("Bootstrap: Device container started successfully")
+                logger.info("Bootstrap: Device container started successfully")
+            else:
+                logger.info("Bootstrap: Device is up to date and running")
 
         # Get current digests and save (using docker manifest inspect)
-        device_digest = self.docker.get_remote_image_digest(DEVICE_IMAGE, "latest")
-        agent_digest = self.docker.get_remote_image_digest(AGENT_IMAGE, "latest")
+        remote_device_digest = self.docker.get_remote_image_digest(DEVICE_IMAGE, "latest")
+        remote_agent_digest = self.docker.get_remote_image_digest(AGENT_IMAGE, "latest")
 
-        if device_digest:
-            self.versions["device"] = device_digest
-        if agent_digest:
-            self.versions["agent"] = agent_digest
+        if remote_device_digest:
+            self.versions["device"] = remote_device_digest
+        if remote_agent_digest:
+            self.versions["agent"] = remote_agent_digest
 
         self._save_versions()
 
         # Report versions to backend
         self.backend.report_version(
-            device_version=device_digest,
-            agent_version=agent_digest,
+            device_version=remote_device_digest,
+            agent_version=remote_agent_digest,
         )
 
         logger.info("=== Bootstrap complete ===")
