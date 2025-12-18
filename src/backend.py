@@ -75,12 +75,14 @@ class BackendClient:
             Each window has: name, start_time (HH:MM), end_time (HH:MM)
         """
         try:
-            response = self._client.get(f"{self.base_url}/api/v1/device/config/")
+            response = self._client.get(f"{self.base_url}/api/v1/device/state/")
             if response.status_code == 200:
                 data = response.json()
-                return data.get("update_windows", [])
+                # update_windows is inside config object
+                config = data.get("config", {})
+                return config.get("update_windows", [])
             else:
-                logger.warning(f"Failed to get config: {response.status_code}")
+                logger.warning(f"Failed to get state: {response.status_code}")
         except Exception as e:
             logger.warning(f"Error getting update windows: {e}")
 
