@@ -2,7 +2,7 @@
 """
 BeachVar Agent - Auto-update service for BeachVar devices.
 
-Monitors for updates and manages container lifecycle.
+Monitors for updates and manages container lifecycle via Docker API.
 """
 
 import logging
