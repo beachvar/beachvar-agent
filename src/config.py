@@ -35,5 +35,5 @@ COMPOSE_FILE_PATH = os.getenv("COMPOSE_FILE_PATH", "/etc/beachvar/docker-compose
 # Version file to track current versions
 VERSION_FILE = Path("/etc/beachvar-agent/versions.json")
 
-# Logging
+# Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
