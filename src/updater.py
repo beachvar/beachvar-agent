@@ -203,16 +203,15 @@ class Updater:
         """
         Update beachvar-agent (self-update).
 
-        Strategy: Pull new image, save version, then exit. Docker Compose
-        will recreate the container with the new image on next start.
-        We use 'docker compose up -d' without --force-recreate to let
-        compose detect the image change and handle recreation gracefully.
+        Strategy: Pull new image, save version, spawn a detached process to
+        recreate the container, then exit. The detached process runs in a
+        new session so it survives when this container is killed.
 
         Args:
             new_digest: The new digest to update to
 
         Returns:
-            True if successful (will restart after)
+            Never returns - exits the process
         """
         logger.info("Updating beachvar-agent (self)...")
 
@@ -225,16 +224,15 @@ class Updater:
         self._save_versions()
         self.backend.report_version(agent_version=new_digest)
 
-        # Use 'docker compose up -d' to recreate with new image
-        # This is safer than --force-recreate for self-updates because
-        # compose will handle the container lifecycle properly
-        logger.info("Agent update complete - recreating container...")
-        if not self.docker.compose_up(self.compose_file, "agent"):
-            logger.error("Failed to recreate agent container")
-            # Exit anyway - the pull succeeded, so next manual restart will use new image
-            sys.exit(1)
+        # Spawn detached process to recreate the container
+        # This runs in a new session so it survives when we exit
+        logger.info("Agent update complete - spawning restart...")
+        self.docker.restart_service_detached(self.compose_file, "agent")
 
-        # Exit so Docker finalizes the recreation
+        # Give the detached process time to start before we exit
+        time.sleep(1)
+
+        # Exit - the detached process will recreate our container
         sys.exit(0)
 
     def run_once(self) -> bool:

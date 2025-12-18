@@ -221,6 +221,43 @@ class DockerClient:
 
         return False
 
+    def restart_service_detached(self, compose_file: Path, service: str) -> bool:
+        """
+        Restart a docker compose service in detached mode.
+
+        This spawns the process in a new session so it survives even if the
+        current container is killed. Useful for self-updates where the agent
+        needs to restart itself.
+
+        Args:
+            compose_file: Path to docker-compose.yml
+            service: Service name
+
+        Returns:
+            True if command was spawned successfully
+        """
+        try:
+            cmd = [
+                "docker", "compose", "-f", str(compose_file),
+                "up", "-d", "--force-recreate", service
+            ]
+            logger.info(f"Spawning detached: {' '.join(cmd)}")
+
+            # Use Popen with start_new_session to detach from current process
+            # This allows the command to continue even after this process dies
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                cwd=compose_file.parent,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error spawning detached restart: {e}")
+            return False
+
     def restart_service(self, compose_file: Path, service: str) -> bool:
         """
         Restart a docker compose service.
