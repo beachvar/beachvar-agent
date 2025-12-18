@@ -73,12 +73,12 @@ class Updater:
 
     def check_device_update(self) -> str | None:
         """
-        Check if beachvar-device needs update.
+        Check if beachvar-device needs update using docker manifest inspect.
 
         Returns:
             New digest if update is available, None otherwise
         """
-        remote_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-device", "latest")
+        remote_digest = self.docker.get_remote_image_digest(DEVICE_IMAGE, "latest")
         if not remote_digest:
             logger.warning("Could not get remote device digest")
             return None
@@ -93,12 +93,12 @@ class Updater:
 
     def check_agent_update(self) -> str | None:
         """
-        Check if beachvar-agent needs update.
+        Check if beachvar-agent needs update using docker manifest inspect.
 
         Returns:
             New digest if update is available, None otherwise
         """
-        remote_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-agent", "latest")
+        remote_digest = self.docker.get_remote_image_digest(AGENT_IMAGE, "latest")
         if not remote_digest:
             logger.warning("Could not get remote agent digest")
             return None
@@ -237,9 +237,9 @@ class Updater:
 
             logger.info("Bootstrap: Device container started successfully")
 
-        # Get current digests and save
-        device_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-device", "latest")
-        agent_digest = self.registry.get_image_digest(f"{GHCR_USER}/beachvar-agent", "latest")
+        # Get current digests and save (using docker manifest inspect)
+        device_digest = self.docker.get_remote_image_digest(DEVICE_IMAGE, "latest")
+        agent_digest = self.docker.get_remote_image_digest(AGENT_IMAGE, "latest")
 
         if device_digest:
             self.versions["device"] = device_digest

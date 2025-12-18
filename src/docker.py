@@ -290,3 +290,41 @@ class DockerClient:
             logger.error(f"Error starting container: {e}")
 
         return False
+
+    def get_remote_image_digest(self, image: str, tag: str = "latest") -> str | None:
+        """
+        Get the digest of a remote image using docker manifest inspect.
+
+        Args:
+            image: Image name (e.g., "ghcr.io/beachvar/beachvar-device")
+            tag: Image tag
+
+        Returns:
+            Image digest (sha256:...) or None if not found
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "manifest", "inspect", f"{image}:{tag}", "--verbose"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                # Parse JSON output to get digest
+                data = json.loads(result.stdout)
+                # For multi-arch images, it's a list; for single arch, it's an object
+                if isinstance(data, list):
+                    # Get the first manifest's digest
+                    if data and "Descriptor" in data[0]:
+                        return data[0]["Descriptor"].get("digest")
+                elif isinstance(data, dict):
+                    if "Descriptor" in data:
+                        return data["Descriptor"].get("digest")
+            else:
+                logger.warning(f"Manifest inspect failed for {image}:{tag}: {result.stderr.strip()}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing manifest JSON: {e}")
+        except Exception as e:
+            logger.error(f"Error getting remote digest: {e}")
+
+        return None
