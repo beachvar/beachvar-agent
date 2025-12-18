@@ -291,7 +291,7 @@ class Updater:
             else:
                 logger.warning("Bootstrap: Failed to update device")
         else:
-            # No update needed, but ensure device is running
+            # No update needed, but ensure all containers are running
             if not self.docker.is_container_running("beachvar-device"):
                 logger.info("Bootstrap: Device container not running, starting...")
 
@@ -300,14 +300,14 @@ class Updater:
                 if not self._pull_with_fallback(DEVICE_IMAGE, "latest"):
                     logger.warning("Bootstrap: Failed to pull device image, will try to start anyway")
 
-                # Start all containers (device, cloudflared, ttyd)
-                if not self.docker.compose_up(self.compose_file):
-                    logger.error("Bootstrap: Failed to start containers")
-                    return False
+            # Start all containers via Docker API (device, cloudflared, ttyd)
+            # Using detached mode to avoid issues if agent gets recreated
+            logger.info("Bootstrap: Starting containers via Docker API...")
+            if not self.docker.compose_up_detached(self.compose_file):
+                logger.error("Bootstrap: Failed to start containers")
+                return False
 
-                logger.info("Bootstrap: All containers started successfully")
-            else:
-                logger.info("Bootstrap: Device is up to date and running")
+            logger.info("Bootstrap: Containers started successfully")
 
         # Get current digests and save (using docker manifest inspect)
         remote_device_digest = self.docker.get_remote_image_digest(DEVICE_IMAGE, "latest")
@@ -333,30 +333,31 @@ class Updater:
         """
         Check if all containers are running and start them if not.
 
-        Only starts individual containers that are down, never runs
-        'docker compose up -d' without specifying services (which would
-        recreate the agent container itself).
+        Uses Docker API to spawn a helper container that starts the services,
+        avoiding issues where 'docker compose up' might recreate the agent.
 
         Returns:
             True if all containers are now running
         """
-        all_running = True
-
-        # Check and start each container individually (except agent)
-        containers = [
+        # Check which containers are down
+        containers_to_start = []
+        container_checks = [
             ("beachvar-device", "device"),
             ("beachvar-cloudflared", "cloudflared"),
             ("beachvar-ttyd", "ttyd"),
         ]
 
-        for container_name, service_name in containers:
+        for container_name, service_name in container_checks:
             if not self.docker.is_container_running(container_name):
-                logger.warning(f"{container_name} is not running, starting...")
-                if not self.docker.compose_up(self.compose_file, service_name):
-                    logger.error(f"Failed to start {service_name}")
-                    all_running = False
+                logger.warning(f"{container_name} is not running")
+                containers_to_start.append(service_name)
 
-        return all_running
+        if not containers_to_start:
+            return True
+
+        # Start all down containers via Docker API
+        logger.info(f"Starting containers via Docker API: {', '.join(containers_to_start)}")
+        return self.docker.compose_up_detached(self.compose_file, containers_to_start)
 
     def run(self):
         """Run the updater with two loops: fast health check, slow update check."""

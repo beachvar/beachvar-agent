@@ -221,6 +221,147 @@ class DockerClient:
 
         return False
 
+    def _run_compose_via_docker_api(
+        self,
+        compose_file: Path,
+        command: str,
+        container_name: str = "beachvar-helper",
+    ) -> bool:
+        """
+        Run a docker compose command using Docker API via Unix socket.
+
+        Creates a temporary container via Docker API that runs the compose
+        command. Since the API call returns immediately after creating the
+        container, and the container is independent, it continues running
+        even after the agent container is killed.
+
+        Args:
+            compose_file: Path to docker-compose.yml
+            command: The compose command to run (e.g., "up -d device cloudflared ttyd")
+            container_name: Name for the helper container
+
+        Returns:
+            True if container was created and started successfully
+        """
+        import socket
+        import urllib.parse
+
+        compose_dir = str(compose_file.parent)
+        compose_filename = compose_file.name
+
+        # Container configuration
+        container_config = {
+            "Image": "docker:cli",
+            "Cmd": ["sh", "-c", f"docker compose -f {compose_filename} {command}"],
+            "WorkingDir": compose_dir,
+            "HostConfig": {
+                "AutoRemove": True,
+                "Binds": [
+                    "/var/run/docker.sock:/var/run/docker.sock",
+                    f"{compose_dir}:{compose_dir}:ro",
+                ],
+            },
+        }
+
+        try:
+            # First, try to remove any existing container with the same name
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect("/var/run/docker.sock")
+            delete_request = (
+                f"DELETE /containers/{urllib.parse.quote(container_name)}?force=true HTTP/1.1\r\n"
+                f"Host: localhost\r\n"
+                f"Content-Length: 0\r\n"
+                f"\r\n"
+            ).encode()
+            sock.sendall(delete_request)
+            sock.recv(4096)  # Ignore response
+            sock.close()
+
+            # Connect to Docker socket
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect("/var/run/docker.sock")
+
+            # Create container
+            body = json.dumps(container_config).encode()
+            request = (
+                f"POST /containers/create?name={urllib.parse.quote(container_name)} HTTP/1.1\r\n"
+                f"Host: localhost\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                f"\r\n"
+            ).encode() + body
+
+            sock.sendall(request)
+            response = sock.recv(4096).decode()
+            sock.close()
+
+            # Check if container was created (201)
+            if "201 Created" not in response:
+                logger.error(f"Failed to create helper container: {response[:200]}")
+                return False
+
+            # Parse container ID
+            body_start = response.find("\r\n\r\n") + 4
+            response_body = response[body_start:]
+            container_id = json.loads(response_body).get("Id", "")[:12]
+
+            # Start the container
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect("/var/run/docker.sock")
+            start_request = (
+                f"POST /containers/{container_name}/start HTTP/1.1\r\n"
+                f"Host: localhost\r\n"
+                f"Content-Length: 0\r\n"
+                f"\r\n"
+            ).encode()
+            sock.sendall(start_request)
+            start_response = sock.recv(4096).decode()
+            sock.close()
+
+            if "204 No Content" in start_response or "304 Not Modified" in start_response:
+                logger.info(f"Helper container started via Docker API: {container_id}")
+                return True
+            else:
+                logger.error(f"Failed to start helper container: {start_response[:200]}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error using Docker API: {e}")
+            return False
+
+    def compose_up_detached(
+        self,
+        compose_file: Path,
+        services: list[str] | None = None,
+    ) -> bool:
+        """
+        Start docker compose services using a detached helper container.
+
+        This method uses the Docker API to spawn a helper container that
+        runs 'docker compose up -d'. This is useful when the agent needs
+        to start services without risking being killed itself.
+
+        Args:
+            compose_file: Path to docker-compose.yml
+            services: List of service names to start (default: all except agent)
+
+        Returns:
+            True if helper container was started successfully
+        """
+        if services:
+            services_str = " ".join(services)
+            command = f"up -d {services_str}"
+        else:
+            # Start all services except agent
+            command = "up -d device cloudflared ttyd"
+
+        logger.info(f"Starting services via Docker API: {command}")
+        return self._run_compose_via_docker_api(
+            compose_file,
+            command,
+            container_name="beachvar-starter",
+        )
+
     def restart_service_detached(self, compose_file: Path, service: str) -> bool:
         """
         Restart a docker compose service using Docker API via Unix socket.
@@ -237,83 +378,13 @@ class DockerClient:
         Returns:
             True if container was created successfully
         """
-        import socket
-        import urllib.parse
-
-        compose_dir = str(compose_file.parent)
-        compose_filename = compose_file.name
-
-        # Container configuration
-        container_config = {
-            "Image": "docker:cli",
-            "Cmd": ["sh", "-c", f"sleep 2 && docker compose -f {compose_filename} up -d --force-recreate {service}"],
-            "WorkingDir": compose_dir,
-            "HostConfig": {
-                "AutoRemove": True,
-                "Binds": [
-                    "/var/run/docker.sock:/var/run/docker.sock",
-                    f"{compose_dir}:{compose_dir}:ro",
-                ],
-            },
-        }
-
-        try:
-            # Connect to Docker socket
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect("/var/run/docker.sock")
-
-            # Create container
-            body = json.dumps(container_config).encode()
-            container_name = "beachvar-agent-updater"
-            request = (
-                f"POST /containers/create?name={urllib.parse.quote(container_name)} HTTP/1.1\r\n"
-                f"Host: localhost\r\n"
-                f"Content-Type: application/json\r\n"
-                f"Content-Length: {len(body)}\r\n"
-                f"\r\n"
-            ).encode() + body
-
-            sock.sendall(request)
-            response = sock.recv(4096).decode()
-            sock.close()
-
-            # Check if container was created (201) or already exists (409)
-            if "201 Created" in response or "409 Conflict" in response:
-                # Extract container ID from response
-                if "201 Created" in response:
-                    # Parse JSON body from response
-                    body_start = response.find("\r\n\r\n") + 4
-                    response_body = response[body_start:]
-                    container_id = json.loads(response_body).get("Id", "")[:12]
-                else:
-                    container_id = "existing"
-
-                # Start the container
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                sock.connect("/var/run/docker.sock")
-                start_request = (
-                    f"POST /containers/{container_name}/start HTTP/1.1\r\n"
-                    f"Host: localhost\r\n"
-                    f"Content-Length: 0\r\n"
-                    f"\r\n"
-                ).encode()
-                sock.sendall(start_request)
-                start_response = sock.recv(4096).decode()
-                sock.close()
-
-                if "204 No Content" in start_response or "304 Not Modified" in start_response:
-                    logger.info(f"Updater container started via Docker API: {container_id}")
-                    return True
-                else:
-                    logger.error(f"Failed to start updater container: {start_response[:200]}")
-                    return False
-            else:
-                logger.error(f"Failed to create updater container: {response[:200]}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Error using Docker API: {e}")
-            return False
+        command = f"up -d --force-recreate {service}"
+        logger.info(f"Restarting service via Docker API: {service}")
+        return self._run_compose_via_docker_api(
+            compose_file,
+            command,
+            container_name="beachvar-agent-updater",
+        )
 
     def restart_service(self, compose_file: Path, service: str) -> bool:
         """
