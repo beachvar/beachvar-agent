@@ -2,10 +2,11 @@
 Backend API client for BeachVar Agent.
 """
 
+import base64
 import logging
 import httpx
 
-from .config import BACKEND_URL, DEVICE_TOKEN
+from .config import BACKEND_URL, DEVICE_ID, DEVICE_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -13,20 +14,38 @@ logger = logging.getLogger(__name__)
 class BackendClient:
     """Client for communicating with BeachVar backend."""
 
-    def __init__(self, base_url: str = BACKEND_URL, device_token: str = DEVICE_TOKEN):
+    def __init__(
+        self,
+        base_url: str = BACKEND_URL,
+        device_id: str = DEVICE_ID,
+        device_token: str = DEVICE_TOKEN,
+    ):
         self.base_url = base_url.rstrip("/")
+        self.device_id = device_id
         self.device_token = device_token
         self._http_client: httpx.Client | None = None
+
+    def _get_auth_headers(self) -> dict:
+        """Get authentication headers for API requests."""
+        headers = {"Content-Type": "application/json"}
+
+        if self.device_id:
+            # Use Basic Auth (preferred)
+            credentials = f"{self.device_id}:{self.device_token}"
+            encoded = base64.b64encode(credentials.encode()).decode()
+            headers["Authorization"] = f"Basic {encoded}"
+        else:
+            # Fallback to legacy X-Device-Token header
+            headers["X-Device-Token"] = self.device_token
+
+        return headers
 
     @property
     def _client(self) -> httpx.Client:
         if self._http_client is None:
             self._http_client = httpx.Client(
                 timeout=30.0,
-                headers={
-                    "X-Device-Token": self.device_token,
-                    "Content-Type": "application/json",
-                },
+                headers=self._get_auth_headers(),
             )
         return self._http_client
 

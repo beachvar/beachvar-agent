@@ -7,6 +7,7 @@ from pathlib import Path
 
 # API Configuration
 BACKEND_URL = os.getenv("BACKEND_URL", "https://api.beachvar.cainelli.xyz")
+DEVICE_ID = os.getenv("DEVICE_ID", "")
 DEVICE_TOKEN = os.getenv("DEVICE_TOKEN", "")
 
 # Docker Configuration
