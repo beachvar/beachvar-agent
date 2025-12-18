@@ -72,6 +72,41 @@ class Updater:
 
         return True
 
+    def _ensure_registry_auth(self) -> bool:
+        """Ensure registry authentication is set up (lazy initialization)."""
+        if not hasattr(self, "_auth_setup_done"):
+            self._auth_setup_done = False
+
+        if not self._auth_setup_done:
+            self._auth_setup_done = self._setup_registry_auth()
+
+        return self._auth_setup_done
+
+    def _pull_with_fallback(self, image: str, tag: str = "latest") -> bool:
+        """
+        Try to pull an image, falling back to authenticated pull if needed.
+
+        First tries without explicit auth (uses cached credentials if any),
+        then falls back to getting fresh token from backend.
+
+        Args:
+            image: Image name
+            tag: Image tag
+
+        Returns:
+            True if pull succeeded
+        """
+        # Try pulling without explicit authentication first
+        if self.docker.try_pull_without_auth(image, tag):
+            return True
+
+        # If that failed, try with fresh authentication
+        logger.info("Pull failed, trying with fresh authentication...")
+        if self._ensure_registry_auth():
+            return self.docker.pull_image(image, tag)
+
+        return False
+
     def check_device_update(self) -> str | None:
         """
         Check if beachvar-device needs update using docker manifest inspect.
@@ -124,8 +159,8 @@ class Updater:
         """
         logger.info("Updating beachvar-device...")
 
-        # Pull new image
-        if not self.docker.pull_image(DEVICE_IMAGE, "latest"):
+        # Pull new image (try without auth first, then with auth)
+        if not self._pull_with_fallback(DEVICE_IMAGE, "latest"):
             return False
 
         # Restart service
@@ -152,8 +187,8 @@ class Updater:
         """
         logger.info("Updating beachvar-agent (self)...")
 
-        # Pull new image
-        if not self.docker.pull_image(AGENT_IMAGE, "latest"):
+        # Pull new image (try without auth first, then with auth)
+        if not self._pull_with_fallback(AGENT_IMAGE, "latest"):
             return False
 
         # Update version before restart
@@ -177,9 +212,8 @@ class Updater:
         Returns:
             True if any update was applied
         """
-        # Setup registry authentication first
-        if not self._setup_registry_auth():
-            return False
+        # Note: Registry auth is now done lazily in _pull_with_fallback
+        # when a pull fails without auth
 
         updated = False
 
@@ -201,19 +235,13 @@ class Updater:
         """
         Bootstrap the device on first run.
 
-        - Login to registry
-        - Check for updates and apply them
+        - Check for updates and apply them (auth is done lazily if needed)
         - Start device container if not running
 
         Returns:
             True if bootstrap was successful
         """
         logger.info("=== Bootstrap: Initializing BeachVar Device ===")
-
-        # Setup registry authentication
-        if not self._setup_registry_auth():
-            logger.error("Bootstrap: Failed to setup registry authentication")
-            return False
 
         # Check if compose file exists
         if not self.compose_file.exists():
@@ -234,9 +262,9 @@ class Updater:
             if not self.docker.is_container_running("beachvar-device"):
                 logger.info("Bootstrap: Device container not running, starting...")
 
-                # Pull images first
+                # Try to pull images (will use auth fallback if needed)
                 logger.info("Bootstrap: Pulling images...")
-                if not self.docker.compose_pull(self.compose_file, "device"):
+                if not self._pull_with_fallback(DEVICE_IMAGE, "latest"):
                     logger.warning("Bootstrap: Failed to pull device image, will try to start anyway")
 
                 # Start device container

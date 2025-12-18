@@ -118,6 +118,41 @@ class DockerClient:
 
         return False
 
+    def try_pull_without_auth(self, image: str, tag: str = "latest") -> bool:
+        """
+        Try to pull an image without authentication.
+        This is useful for public images or when already logged in.
+
+        Args:
+            image: Image name
+            tag: Image tag
+
+        Returns:
+            True if successful, False if auth might be needed
+        """
+        try:
+            logger.debug(f"Trying to pull {image}:{tag} without explicit auth...")
+            result = subprocess.run(
+                ["docker", "pull", f"{image}:{tag}"],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            if result.returncode == 0:
+                logger.info(f"Successfully pulled {image}:{tag} (no auth needed)")
+                return True
+            else:
+                # Check if it's an auth error
+                stderr = result.stderr.lower()
+                if "unauthorized" in stderr or "denied" in stderr or "authentication" in stderr:
+                    logger.debug(f"Pull requires authentication for {image}:{tag}")
+                else:
+                    logger.warning(f"Pull failed (non-auth error): {result.stderr}")
+                return False
+        except Exception as e:
+            logger.debug(f"Error in unauthenticated pull: {e}")
+            return False
+
     def compose_up(self, compose_file: Path, service: str | None = None) -> bool:
         """
         Run docker compose up for a service.
