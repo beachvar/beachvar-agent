@@ -223,11 +223,11 @@ class DockerClient:
 
     def restart_service_detached(self, compose_file: Path, service: str) -> bool:
         """
-        Restart a docker compose service in detached mode.
+        Restart a docker compose service using a separate container.
 
-        This spawns the process in a new session so it survives even if the
-        current container is killed. Useful for self-updates where the agent
-        needs to restart itself.
+        This spawns a new container that runs the recreate command. Since the
+        spawned container is independent, it continues running even after the
+        current container is killed. This is used for agent self-updates.
 
         Args:
             compose_file: Path to docker-compose.yml
@@ -237,25 +237,38 @@ class DockerClient:
             True if command was spawned successfully
         """
         try:
-            cmd = [
-                "docker", "compose", "-f", str(compose_file),
-                "up", "-d", "--force-recreate", service
-            ]
-            logger.info(f"Spawning detached: {' '.join(cmd)}")
+            # Use a separate container to run the compose command
+            # This container will survive even when the agent container is killed
+            compose_dir = str(compose_file.parent)
+            compose_filename = compose_file.name
 
-            # Use Popen with start_new_session to detach from current process
-            # This allows the command to continue even after this process dies
-            subprocess.Popen(
+            cmd = [
+                "docker", "run", "-d", "--rm",
+                "--name", "beachvar-agent-updater",
+                "-v", "/var/run/docker.sock:/var/run/docker.sock",
+                "-v", f"{compose_dir}:{compose_dir}:ro",
+                "-w", compose_dir,
+                "docker:cli",
+                "sh", "-c",
+                f"sleep 2 && docker compose -f {compose_filename} up -d --force-recreate {service}"
+            ]
+            logger.info(f"Spawning updater container: {' '.join(cmd)}")
+
+            result = subprocess.run(
                 cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
-                cwd=compose_file.parent,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
-            return True
+
+            if result.returncode == 0:
+                logger.info(f"Updater container started: {result.stdout.strip()[:12]}")
+                return True
+            else:
+                logger.error(f"Failed to start updater container: {result.stderr}")
+                return False
         except Exception as e:
-            logger.error(f"Error spawning detached restart: {e}")
+            logger.error(f"Error spawning updater container: {e}")
             return False
 
     def restart_service(self, compose_file: Path, service: str) -> bool:
