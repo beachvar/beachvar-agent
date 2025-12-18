@@ -221,6 +221,42 @@ class DockerClient:
 
         return False
 
+    def _ensure_helper_image(self) -> bool:
+        """
+        Ensure the docker:cli helper image is available locally.
+
+        Returns:
+            True if image is available
+        """
+        try:
+            # Check if image exists
+            result = subprocess.run(
+                ["docker", "images", "-q", "docker:cli"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return True
+
+            # Image doesn't exist, pull it
+            logger.info("Pulling docker:cli helper image...")
+            pull_result = subprocess.run(
+                ["docker", "pull", "docker:cli"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if pull_result.returncode == 0:
+                logger.info("Helper image pulled successfully")
+                return True
+            else:
+                logger.error(f"Failed to pull helper image: {pull_result.stderr}")
+                return False
+        except Exception as e:
+            logger.error(f"Error checking/pulling helper image: {e}")
+            return False
+
     def _run_compose_via_docker_api(
         self,
         compose_file: Path,
@@ -245,6 +281,11 @@ class DockerClient:
         """
         import socket
         import urllib.parse
+
+        # Ensure helper image is available
+        if not self._ensure_helper_image():
+            logger.error("Helper image not available, falling back to subprocess")
+            return False
 
         compose_dir = str(compose_file.parent)
         compose_filename = compose_file.name
