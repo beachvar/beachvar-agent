@@ -300,12 +300,12 @@ class Updater:
                 if not self._pull_with_fallback(DEVICE_IMAGE, "latest"):
                     logger.warning("Bootstrap: Failed to pull device image, will try to start anyway")
 
-                # Start device container
-                if not self.docker.compose_up(self.compose_file, "device"):
-                    logger.error("Bootstrap: Failed to start device container")
+                # Start all containers (device, cloudflared, ttyd)
+                if not self.docker.compose_up(self.compose_file):
+                    logger.error("Bootstrap: Failed to start containers")
                     return False
 
-                logger.info("Bootstrap: Device container started successfully")
+                logger.info("Bootstrap: All containers started successfully")
             else:
                 logger.info("Bootstrap: Device is up to date and running")
 
@@ -329,18 +329,30 @@ class Updater:
         logger.info("=== Bootstrap complete ===")
         return True
 
-    def ensure_device_running(self) -> bool:
+    def ensure_containers_running(self) -> bool:
         """
-        Check if device container is running and start it if not.
+        Check if all containers are running and start them if not.
 
         Returns:
-            True if device is now running
+            True if all containers are now running
         """
-        if self.docker.is_container_running("beachvar-device"):
+        # Check if the main containers are running
+        device_running = self.docker.is_container_running("beachvar-device")
+        cloudflared_running = self.docker.is_container_running("beachvar-cloudflared")
+        ttyd_running = self.docker.is_container_running("beachvar-ttyd")
+
+        if device_running and cloudflared_running and ttyd_running:
             return True
 
-        logger.warning("Device container is not running, starting...")
-        return self.docker.compose_up(self.compose_file, "device")
+        if not device_running:
+            logger.warning("Device container is not running")
+        if not cloudflared_running:
+            logger.warning("Cloudflared container is not running")
+        if not ttyd_running:
+            logger.warning("TTYD container is not running")
+
+        logger.info("Starting all containers...")
+        return self.docker.compose_up(self.compose_file)
 
     def run(self):
         """Run the updater with two loops: fast health check, slow update check."""
@@ -360,8 +372,8 @@ class Updater:
 
         while True:
             try:
-                # Fast loop: ensure device is running (every 5 seconds)
-                self.ensure_device_running()
+                # Fast loop: ensure all containers are running (every 5 seconds)
+                self.ensure_containers_running()
 
                 # Slow loop: check for updates (every 5 minutes, respects update windows)
                 now = time.time()
