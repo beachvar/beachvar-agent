@@ -203,6 +203,11 @@ class Updater:
         """
         Update beachvar-agent (self-update).
 
+        Strategy: Pull new image, save version, then exit. Docker Compose
+        will recreate the container with the new image on next start.
+        We use 'docker compose up -d' without --force-recreate to let
+        compose detect the image change and handle recreation gracefully.
+
         Args:
             new_digest: The new digest to update to
 
@@ -220,13 +225,16 @@ class Updater:
         self._save_versions()
         self.backend.report_version(agent_version=new_digest)
 
-        # Restart self (will be recreated with new image)
-        logger.info("Agent update complete - restarting...")
-        if not self.docker.restart_service(self.compose_file, "agent"):
-            logger.error("Failed to restart agent")
-            return False
+        # Use 'docker compose up -d' to recreate with new image
+        # This is safer than --force-recreate for self-updates because
+        # compose will handle the container lifecycle properly
+        logger.info("Agent update complete - recreating container...")
+        if not self.docker.compose_up(self.compose_file, "agent"):
+            logger.error("Failed to recreate agent container")
+            # Exit anyway - the pull succeeded, so next manual restart will use new image
+            sys.exit(1)
 
-        # Exit so Docker restarts us with new image
+        # Exit so Docker finalizes the recreation
         sys.exit(0)
 
     def run_once(self) -> bool:
