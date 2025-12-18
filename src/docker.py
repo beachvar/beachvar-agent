@@ -223,52 +223,96 @@ class DockerClient:
 
     def restart_service_detached(self, compose_file: Path, service: str) -> bool:
         """
-        Restart a docker compose service using a separate container.
+        Restart a docker compose service using Docker API via Unix socket.
 
-        This spawns a new container that runs the recreate command. Since the
-        spawned container is independent, it continues running even after the
-        current container is killed. This is used for agent self-updates.
+        Creates a temporary container via Docker API that runs the compose
+        command. Since the API call returns immediately after creating the
+        container, and the container is independent, it continues running
+        even after the agent container is killed.
 
         Args:
             compose_file: Path to docker-compose.yml
             service: Service name
 
         Returns:
-            True if command was spawned successfully
+            True if container was created successfully
         """
+        import socket
+        import urllib.parse
+
+        compose_dir = str(compose_file.parent)
+        compose_filename = compose_file.name
+
+        # Container configuration
+        container_config = {
+            "Image": "docker:cli",
+            "Cmd": ["sh", "-c", f"sleep 2 && docker compose -f {compose_filename} up -d --force-recreate {service}"],
+            "WorkingDir": compose_dir,
+            "HostConfig": {
+                "AutoRemove": True,
+                "Binds": [
+                    "/var/run/docker.sock:/var/run/docker.sock",
+                    f"{compose_dir}:{compose_dir}:ro",
+                ],
+            },
+        }
+
         try:
-            # Use a separate container to run the compose command
-            # This container will survive even when the agent container is killed
-            compose_dir = str(compose_file.parent)
-            compose_filename = compose_file.name
+            # Connect to Docker socket
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect("/var/run/docker.sock")
 
-            cmd = [
-                "docker", "run", "-d", "--rm",
-                "--name", "beachvar-agent-updater",
-                "-v", "/var/run/docker.sock:/var/run/docker.sock",
-                "-v", f"{compose_dir}:{compose_dir}:ro",
-                "-w", compose_dir,
-                "docker:cli",
-                "sh", "-c",
-                f"sleep 2 && docker compose -f {compose_filename} up -d --force-recreate {service}"
-            ]
-            logger.info(f"Spawning updater container: {' '.join(cmd)}")
+            # Create container
+            body = json.dumps(container_config).encode()
+            container_name = "beachvar-agent-updater"
+            request = (
+                f"POST /containers/create?name={urllib.parse.quote(container_name)} HTTP/1.1\r\n"
+                f"Host: localhost\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                f"\r\n"
+            ).encode() + body
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            sock.sendall(request)
+            response = sock.recv(4096).decode()
+            sock.close()
 
-            if result.returncode == 0:
-                logger.info(f"Updater container started: {result.stdout.strip()[:12]}")
-                return True
+            # Check if container was created (201) or already exists (409)
+            if "201 Created" in response or "409 Conflict" in response:
+                # Extract container ID from response
+                if "201 Created" in response:
+                    # Parse JSON body from response
+                    body_start = response.find("\r\n\r\n") + 4
+                    response_body = response[body_start:]
+                    container_id = json.loads(response_body).get("Id", "")[:12]
+                else:
+                    container_id = "existing"
+
+                # Start the container
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.connect("/var/run/docker.sock")
+                start_request = (
+                    f"POST /containers/{container_name}/start HTTP/1.1\r\n"
+                    f"Host: localhost\r\n"
+                    f"Content-Length: 0\r\n"
+                    f"\r\n"
+                ).encode()
+                sock.sendall(start_request)
+                start_response = sock.recv(4096).decode()
+                sock.close()
+
+                if "204 No Content" in start_response or "304 Not Modified" in start_response:
+                    logger.info(f"Updater container started via Docker API: {container_id}")
+                    return True
+                else:
+                    logger.error(f"Failed to start updater container: {start_response[:200]}")
+                    return False
             else:
-                logger.error(f"Failed to start updater container: {result.stderr}")
+                logger.error(f"Failed to create updater container: {response[:200]}")
                 return False
+
         except Exception as e:
-            logger.error(f"Error spawning updater container: {e}")
+            logger.error(f"Error using Docker API: {e}")
             return False
 
     def restart_service(self, compose_file: Path, service: str) -> bool:

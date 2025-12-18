@@ -26,19 +26,13 @@ class BackendClient:
         self._http_client: httpx.Client | None = None
 
     def _get_auth_headers(self) -> dict:
-        """Get authentication headers for API requests."""
-        headers = {"Content-Type": "application/json"}
-
-        if self.device_id:
-            # Use Basic Auth (preferred)
-            credentials = f"{self.device_id}:{self.device_token}"
-            encoded = base64.b64encode(credentials.encode()).decode()
-            headers["Authorization"] = f"Basic {encoded}"
-        else:
-            # Fallback to legacy X-Device-Token header
-            headers["X-Device-Token"] = self.device_token
-
-        return headers
+        """Get authentication headers for API requests using Basic Auth."""
+        credentials = f"{self.device_id}:{self.device_token}"
+        encoded = base64.b64encode(credentials.encode()).decode()
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {encoded}",
+        }
 
     @property
     def _client(self) -> httpx.Client:
