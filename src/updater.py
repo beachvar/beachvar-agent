@@ -10,7 +10,8 @@ import time
 from pathlib import Path
 
 from .config import (
-    CHECK_INTERVAL_SECONDS,
+    HEALTH_CHECK_INTERVAL_SECONDS,
+    UPDATE_CHECK_INTERVAL_SECONDS,
     COMPOSE_FILE_PATH,
     DEBUG,
     DEVICE_IMAGE,
@@ -299,31 +300,50 @@ class Updater:
         logger.info("=== Bootstrap complete ===")
         return True
 
+    def ensure_device_running(self) -> bool:
+        """
+        Check if device container is running and start it if not.
+
+        Returns:
+            True if device is now running
+        """
+        if self.docker.is_container_running("beachvar-device"):
+            return True
+
+        logger.warning("Device container is not running, starting...")
+        return self.docker.compose_up(self.compose_file, "device")
+
     def run(self):
-        """Run the updater in a loop."""
+        """Run the updater with two loops: fast health check, slow update check."""
         logger.info("BeachVar Agent starting...")
         if DEBUG:
             logger.info("DEBUG MODE: Using faster update check interval (30s)")
-        logger.info(f"Check interval: {CHECK_INTERVAL_SECONDS} seconds")
+        logger.info(f"Health check interval: {HEALTH_CHECK_INTERVAL_SECONDS} seconds")
+        logger.info(f"Update check interval: {UPDATE_CHECK_INTERVAL_SECONDS} seconds")
         logger.info(f"Compose file: {COMPOSE_FILE_PATH}")
 
         # Bootstrap: ensure device is running
         if not self.bootstrap():
             logger.error("Bootstrap failed, will retry in next cycle")
 
+        # Track when we last checked for updates
+        last_update_check = 0
+
         while True:
             try:
-                # Check if device is still running, restart if needed
-                if not self.docker.is_container_running("beachvar-device"):
-                    logger.warning("Device container is not running, restarting...")
-                    self.docker.compose_up(self.compose_file, "device")
+                # Fast loop: ensure device is running (every 5 seconds)
+                self.ensure_device_running()
 
-                self.run_once()
+                # Slow loop: check for updates (every 5 minutes, respects update windows)
+                now = time.time()
+                if now - last_update_check >= UPDATE_CHECK_INTERVAL_SECONDS:
+                    self.run_once()
+                    last_update_check = now
+
             except Exception as e:
                 logger.error(f"Error in update cycle: {e}")
 
-            logger.debug(f"Sleeping for {CHECK_INTERVAL_SECONDS} seconds...")
-            time.sleep(CHECK_INTERVAL_SECONDS)
+            time.sleep(HEALTH_CHECK_INTERVAL_SECONDS)
 
     def close(self):
         """Clean up resources."""

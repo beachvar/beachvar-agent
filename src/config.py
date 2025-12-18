@@ -19,9 +19,16 @@ AGENT_IMAGE = f"{GHCR_REGISTRY}/{GHCR_USER}/beachvar-agent"
 DEBUG = os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
 
 # Update Configuration
+# Health check: verify device is running (fast loop)
+HEALTH_CHECK_INTERVAL_SECONDS = 5
+
+# Version check: check for updates (slow loop, respects update windows)
 # In debug mode, check every 30 seconds; otherwise every 5 minutes
-DEFAULT_CHECK_INTERVAL = 30 if DEBUG else 300
-CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", str(DEFAULT_CHECK_INTERVAL)))
+DEFAULT_UPDATE_CHECK_INTERVAL = 30 if DEBUG else 300
+UPDATE_CHECK_INTERVAL_SECONDS = int(os.getenv("UPDATE_CHECK_INTERVAL_SECONDS", str(DEFAULT_UPDATE_CHECK_INTERVAL)))
+
+# Legacy alias for backwards compatibility
+CHECK_INTERVAL_SECONDS = UPDATE_CHECK_INTERVAL_SECONDS
 COMPOSE_FILE_PATH = os.getenv("COMPOSE_FILE_PATH", "/etc/beachvar/docker-compose.yml")
 
 # Version file to track current versions
