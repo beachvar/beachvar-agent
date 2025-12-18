@@ -53,6 +53,80 @@ class BackendClient:
 
         return None
 
+    def get_update_windows(self) -> list[dict] | None:
+        """
+        Get update windows configuration from backend.
+
+        Returns:
+            List of update windows or None if failed.
+            Each window has: name, start_time (HH:MM), end_time (HH:MM)
+        """
+        try:
+            response = self._client.get(f"{self.base_url}/api/v1/device/config/")
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("update_windows", [])
+            else:
+                logger.warning(f"Failed to get config: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"Error getting update windows: {e}")
+
+        return None
+
+    def is_update_allowed(self) -> bool:
+        """
+        Check if updates are allowed based on configured time windows.
+
+        Returns:
+            True if updates are allowed now, False otherwise.
+            If no windows are configured or fetch fails, returns True (allow updates).
+        """
+        from datetime import datetime
+
+        windows = self.get_update_windows()
+
+        # If we couldn't fetch windows or none configured, allow updates
+        if windows is None:
+            logger.debug("Could not fetch update windows, allowing updates")
+            return True
+
+        if not windows:
+            logger.debug("No update windows configured, allowing updates")
+            return True
+
+        # Get current time
+        now = datetime.now().time()
+
+        for window in windows:
+            try:
+                start_str = window.get("start_time", "")
+                end_str = window.get("end_time", "")
+
+                if not start_str or not end_str:
+                    continue
+
+                start_time = datetime.strptime(start_str, "%H:%M").time()
+                end_time = datetime.strptime(end_str, "%H:%M").time()
+
+                # Handle windows that cross midnight
+                if start_time <= end_time:
+                    # Normal window (e.g., 02:00 - 06:00)
+                    if start_time <= now <= end_time:
+                        logger.debug(f"Inside update window: {window.get('name', 'unnamed')}")
+                        return True
+                else:
+                    # Window crosses midnight (e.g., 23:00 - 06:00)
+                    if now >= start_time or now <= end_time:
+                        logger.debug(f"Inside update window: {window.get('name', 'unnamed')}")
+                        return True
+
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid update window format: {window}, error: {e}")
+                continue
+
+        logger.info(f"Outside all update windows, skipping update check")
+        return False
+
     def report_version(
         self,
         device_version: str | None = None,

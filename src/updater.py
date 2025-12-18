@@ -212,8 +212,11 @@ class Updater:
         Returns:
             True if any update was applied
         """
-        # Note: Registry auth is now done lazily in _pull_with_fallback
-        # when a pull fails without auth
+        # Check if we're inside an update window first
+        # This saves resources by not checking for updates outside allowed times
+        if not self.backend.is_update_allowed():
+            logger.debug("Outside update window, skipping update check")
+            return False
 
         updated = False
 
