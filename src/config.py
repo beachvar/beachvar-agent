@@ -28,6 +28,11 @@ HEALTH_CHECK_INTERVAL_SECONDS = 5
 DEFAULT_UPDATE_CHECK_INTERVAL = 30 if DEBUG else 300
 UPDATE_CHECK_INTERVAL_SECONDS = int(os.getenv("UPDATE_CHECK_INTERVAL_SECONDS", str(DEFAULT_UPDATE_CHECK_INTERVAL)))
 
+# Config sync: run docker compose up -d to apply any config changes
+# In debug mode, sync every 2 minutes; otherwise every 30 minutes
+DEFAULT_CONFIG_SYNC_INTERVAL = 120 if DEBUG else 1800
+CONFIG_SYNC_INTERVAL_SECONDS = int(os.getenv("CONFIG_SYNC_INTERVAL_SECONDS", str(DEFAULT_CONFIG_SYNC_INTERVAL)))
+
 # Legacy alias for backwards compatibility
 CHECK_INTERVAL_SECONDS = UPDATE_CHECK_INTERVAL_SECONDS
 COMPOSE_FILE_PATH = os.getenv("COMPOSE_FILE_PATH", "/etc/beachvar/docker-compose.yml")

@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import (
     HEALTH_CHECK_INTERVAL_SECONDS,
     UPDATE_CHECK_INTERVAL_SECONDS,
+    CONFIG_SYNC_INTERVAL_SECONDS,
     COMPOSE_FILE_PATH,
     DEBUG,
     DEVICE_IMAGE,
@@ -359,32 +360,63 @@ class Updater:
         logger.info(f"Starting containers via Docker API: {', '.join(containers_to_start)}")
         return self.docker.compose_up_detached(self.compose_file, containers_to_start)
 
+    def sync_config(self) -> bool:
+        """
+        Sync docker-compose configuration by running 'docker compose up -d'.
+
+        This ensures any configuration changes in docker-compose.yml are applied
+        to running containers (e.g., environment variables, volumes, etc.).
+
+        Returns:
+            True if sync was successful
+        """
+        logger.info("Syncing docker-compose configuration...")
+
+        # Run docker compose up -d for all services except agent (to avoid self-restart)
+        services = ["device", "cloudflared", "ttyd"]
+        result = self.docker.compose_up_detached(self.compose_file, services)
+
+        if result:
+            logger.info("Config sync completed successfully")
+        else:
+            logger.warning("Config sync failed")
+
+        return result
+
     def run(self):
-        """Run the updater with two loops: fast health check, slow update check."""
+        """Run the updater with three loops: fast health check, slow update check, config sync."""
         logger.info("BeachVar Agent starting...")
         if DEBUG:
-            logger.info("DEBUG MODE: Using faster update check interval (30s)")
+            logger.info("DEBUG MODE: Using faster intervals")
         logger.info(f"Health check interval: {HEALTH_CHECK_INTERVAL_SECONDS} seconds")
         logger.info(f"Update check interval: {UPDATE_CHECK_INTERVAL_SECONDS} seconds")
+        logger.info(f"Config sync interval: {CONFIG_SYNC_INTERVAL_SECONDS} seconds")
         logger.info(f"Compose file: {COMPOSE_FILE_PATH}")
 
         # Bootstrap: ensure device is running
         if not self.bootstrap():
             logger.error("Bootstrap failed, will retry in next cycle")
 
-        # Track when we last checked for updates
+        # Track when we last checked for updates and synced config
         last_update_check = 0
+        last_config_sync = 0
 
         while True:
             try:
                 # Fast loop: ensure all containers are running (every 5 seconds)
                 self.ensure_containers_running()
 
-                # Slow loop: check for updates (every 5 minutes, respects update windows)
                 now = time.time()
+
+                # Slow loop: check for updates (every 5 minutes, respects update windows)
                 if now - last_update_check >= UPDATE_CHECK_INTERVAL_SECONDS:
                     self.run_once()
                     last_update_check = now
+
+                # Config sync loop: apply docker-compose.yml changes (every 30 minutes)
+                if now - last_config_sync >= CONFIG_SYNC_INTERVAL_SECONDS:
+                    self.sync_config()
+                    last_config_sync = now
 
             except Exception as e:
                 logger.error(f"Error in update cycle: {e}")
