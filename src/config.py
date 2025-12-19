@@ -1,5 +1,7 @@
 """
 Configuration for BeachVar Agent.
+
+Environment variables and default settings.
 """
 
 import os
