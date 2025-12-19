@@ -38,6 +38,7 @@ class Updater:
         self.registry = RegistryClient(GHCR_REGISTRY)
         self.compose_file = Path(COMPOSE_FILE_PATH)
         self.versions = self._load_versions()
+        self._agent_update_pending = False  # Flag to track if agent needs recreation
 
     def _load_versions(self) -> dict:
         """Load current versions from file."""
@@ -225,6 +226,9 @@ class Updater:
         self._save_versions()
         self.backend.report_version(agent_version=new_digest)
 
+        # Mark that agent update is pending - next sync_config will recreate the agent
+        self._agent_update_pending = True
+
         logger.info("Agent update prepared - will be applied on next config sync")
         return True
 
@@ -358,24 +362,33 @@ class Updater:
 
     def sync_config(self) -> bool:
         """
-        Sync docker-compose configuration by running 'docker compose up -d --force-recreate'.
+        Sync docker-compose configuration by running 'docker compose up -d'.
 
         This ensures any configuration changes in docker-compose.yml are applied
         to running containers (e.g., environment variables, volumes, etc.).
-        Uses --force-recreate to ensure containers are properly recreated with new images.
+
+        If an agent update is pending, uses --force-recreate to apply it.
 
         Returns:
             True if sync was successful
         """
-        logger.info("Syncing docker-compose configuration...")
-
-        # Run docker compose up -d --force-recreate for all services (including agent for self-updates)
-        result = self.docker.compose_up_detached(self.compose_file, force_recreate=True)
-
-        if result:
-            logger.info("Config sync completed successfully")
+        if self._agent_update_pending:
+            logger.info("Syncing docker-compose configuration (with agent update)...")
+            # Use force-recreate to apply the agent update
+            result = self.docker.compose_up_detached(self.compose_file, force_recreate=True)
+            if result:
+                self._agent_update_pending = False
+                logger.info("Config sync completed - agent will be recreated")
+            else:
+                logger.warning("Config sync failed")
         else:
-            logger.warning("Config sync failed")
+            logger.info("Syncing docker-compose configuration...")
+            # Normal sync without force-recreate (won't kill agent)
+            result = self.docker.compose_up_detached(self.compose_file, force_recreate=False)
+            if result:
+                logger.info("Config sync completed successfully")
+            else:
+                logger.warning("Config sync failed")
 
         return result
 
@@ -394,8 +407,9 @@ class Updater:
             logger.error("Bootstrap failed, will retry in next cycle")
 
         # Track when we last checked for updates and synced config
+        # Initialize with current time to avoid immediate sync after bootstrap
         last_update_check = 0
-        last_config_sync = 0
+        last_config_sync = time.time()
 
         while True:
             try:
