@@ -356,18 +356,19 @@ class Updater:
 
     def sync_config(self) -> bool:
         """
-        Sync docker-compose configuration by running 'docker compose up -d'.
+        Sync docker-compose configuration by running 'docker compose up -d --force-recreate'.
 
         This ensures any configuration changes in docker-compose.yml are applied
         to running containers (e.g., environment variables, volumes, etc.).
+        Uses --force-recreate to ensure containers are properly recreated with new images.
 
         Returns:
             True if sync was successful
         """
         logger.info("Syncing docker-compose configuration...")
 
-        # Run docker compose up -d for all services (including agent for self-updates)
-        result = self.docker.compose_up_detached(self.compose_file)
+        # Run docker compose up -d --force-recreate for all services (including agent for self-updates)
+        result = self.docker.compose_up_detached(self.compose_file, force_recreate=True)
 
         if result:
             logger.info("Config sync completed successfully")
