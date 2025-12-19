@@ -1,5 +1,7 @@
 """
 Docker operations for BeachVar Agent.
+
+Provides Docker and Docker Compose management functions.
 """
 
 import hashlib
