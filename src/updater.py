@@ -1,5 +1,7 @@
 """
 Main updater logic for BeachVar Agent.
+
+Handles self-updates, device updates, and container health checks.
 """
 
 import json
