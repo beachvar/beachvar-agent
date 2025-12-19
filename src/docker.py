@@ -396,8 +396,8 @@ class DockerClient:
             services_str = " ".join(services)
             command = f"up -d {force_flag}{services_str}"
         else:
-            # Start all services except agent
-            command = f"up -d {force_flag}device cloudflared ttyd"
+            # Start all services including agent (for self-updates)
+            command = f"up -d {force_flag}agent device cloudflared ttyd"
 
         logger.info(f"Starting services via Docker API: {command}")
         return self._run_compose_via_docker_api(
