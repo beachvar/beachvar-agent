@@ -5,7 +5,6 @@ Main updater logic for BeachVar Agent.
 import json
 import logging
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -204,15 +203,14 @@ class Updater:
         """
         Update beachvar-agent (self-update).
 
-        Strategy: Pull new image, save version, spawn a detached process to
-        recreate the container, then exit. The detached process runs in a
-        new session so it survives when this container is killed.
+        Strategy: Pull new image, save version. The container will be recreated
+        by the periodic config sync (docker compose up -d) which runs externally.
 
         Args:
             new_digest: The new digest to update to
 
         Returns:
-            Never returns - exits the process
+            True if update was prepared successfully
         """
         logger.info("Updating beachvar-agent (self)...")
 
@@ -220,21 +218,13 @@ class Updater:
         if not self._pull_with_fallback(AGENT_IMAGE, "latest"):
             return False
 
-        # Update version before restart
+        # Update version
         self.versions["agent"] = new_digest
         self._save_versions()
         self.backend.report_version(agent_version=new_digest)
 
-        # Spawn detached process to recreate the container
-        # This runs in a new session so it survives when we exit
-        logger.info("Agent update complete - spawning restart...")
-        self.docker.restart_service_detached(self.compose_file, "agent")
-
-        # Give the detached process time to start before we exit
-        time.sleep(1)
-
-        # Exit - the detached process will recreate our container
-        sys.exit(0)
+        logger.info("Agent update prepared - will be applied on next config sync")
+        return True
 
     def run_once(self) -> bool:
         """
@@ -372,9 +362,8 @@ class Updater:
         """
         logger.info("Syncing docker-compose configuration...")
 
-        # Run docker compose up -d for all services except agent (to avoid self-restart)
-        services = ["device", "cloudflared", "ttyd"]
-        result = self.docker.compose_up_detached(self.compose_file, services)
+        # Run docker compose up -d for all services (including agent for self-updates)
+        result = self.docker.compose_up_detached(self.compose_file)
 
         if result:
             logger.info("Config sync completed successfully")
