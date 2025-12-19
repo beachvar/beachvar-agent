@@ -324,8 +324,9 @@ class Updater:
         """
         Check if all containers are running and start them if not.
 
-        Uses Docker API to spawn a helper container that starts the services,
-        avoiding issues where 'docker compose up' might recreate the agent.
+        Uses Docker API to spawn a helper container that starts the services
+        with --force-recreate to handle cases where container names are
+        corrupted or there are conflicts.
 
         Returns:
             True if all containers are now running
@@ -346,9 +347,12 @@ class Updater:
         if not containers_to_start:
             return True
 
-        # Start all down containers via Docker API
-        logger.info(f"Starting containers via Docker API: {', '.join(containers_to_start)}")
-        return self.docker.compose_up_detached(self.compose_file, containers_to_start)
+        # Start all down containers via Docker API with --force-recreate
+        # This ensures containers are properly recreated even if there are naming conflicts
+        logger.info(f"Recreating containers via Docker API: {', '.join(containers_to_start)}")
+        return self.docker.compose_up_detached(
+            self.compose_file, containers_to_start, force_recreate=True
+        )
 
     def sync_config(self) -> bool:
         """

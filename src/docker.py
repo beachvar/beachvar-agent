@@ -374,6 +374,7 @@ class DockerClient:
         self,
         compose_file: Path,
         services: list[str] | None = None,
+        force_recreate: bool = False,
     ) -> bool:
         """
         Start docker compose services using a detached helper container.
@@ -385,16 +386,18 @@ class DockerClient:
         Args:
             compose_file: Path to docker-compose.yml
             services: List of service names to start (default: all except agent)
+            force_recreate: If True, use --force-recreate to recreate containers
 
         Returns:
             True if helper container was started successfully
         """
+        force_flag = "--force-recreate " if force_recreate else ""
         if services:
             services_str = " ".join(services)
-            command = f"up -d {services_str}"
+            command = f"up -d {force_flag}{services_str}"
         else:
             # Start all services except agent
-            command = "up -d device cloudflared ttyd"
+            command = f"up -d {force_flag}device cloudflared ttyd"
 
         logger.info(f"Starting services via Docker API: {command}")
         return self._run_compose_via_docker_api(
@@ -467,6 +470,9 @@ class DockerClient:
         """
         Check if a container is running.
 
+        First tries exact name match, then falls back to partial match
+        (for cases where Docker Compose prefixes container names).
+
         Args:
             container_name: Name of the container
 
@@ -474,13 +480,35 @@ class DockerClient:
             True if running
         """
         try:
+            # First try exact name match
             result = subprocess.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            return result.returncode == 0 and result.stdout.strip() == "true"
+            if result.returncode == 0 and result.stdout.strip() == "true":
+                return True
+
+            # If exact match fails, try finding container with name pattern
+            # This handles cases where Docker prefixes container names
+            result = subprocess.run(
+                [
+                    "docker", "ps", "--filter", f"name={container_name}",
+                    "--format", "{{.State}}"
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                states = result.stdout.strip().split('\n')
+                # Check if any container matching the name is running
+                for state in states:
+                    if state.lower() == "running":
+                        return True
+
+            return False
         except Exception as e:
             logger.debug(f"Error checking container: {e}")
             return False
