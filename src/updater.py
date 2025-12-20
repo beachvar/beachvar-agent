@@ -111,9 +111,41 @@ class Updater:
 
         return False
 
+    def _get_remote_digest_via_api(self, image: str, tag: str = "latest") -> str | None:
+        """
+        Get remote image digest using HTTP API (no docker CLI needed).
+
+        Uses the RegistryClient to fetch the digest directly from ghcr.io.
+        This is more reliable and faster than docker manifest inspect.
+
+        Args:
+            image: Full image name (e.g., "ghcr.io/beachvar/beachvar-device")
+            tag: Image tag
+
+        Returns:
+            Image digest or None if failed
+        """
+        # Extract the image path without registry prefix for the API call
+        # e.g., "ghcr.io/beachvar/beachvar-device" -> "beachvar/beachvar-device"
+        image_path = image.replace(f"{GHCR_REGISTRY}/", "")
+
+        # Ensure we have auth set up
+        if not self._ensure_registry_auth():
+            logger.warning("Could not set up registry authentication")
+            return None
+
+        # Use RegistryClient to get digest via HTTP API
+        digest = self.registry.get_image_digest(image_path, tag)
+        if digest:
+            logger.debug(f"Got digest for {image}:{tag} via API: {digest[:19]}...")
+            return digest
+
+        logger.warning(f"Could not get digest for {image}:{tag} via API")
+        return None
+
     def _get_remote_digest_with_auth_fallback(self, image: str, tag: str = "latest") -> str | None:
         """
-        Get remote image digest, trying without auth first, then with auth.
+        Get remote image digest, trying API first, then falling back to docker CLI.
 
         Args:
             image: Image name
@@ -122,13 +154,19 @@ class Updater:
         Returns:
             Image digest or None if failed
         """
-        # Try without explicit auth first (uses cached credentials if any)
+        # Try via HTTP API first (faster and more reliable)
+        remote_digest = self._get_remote_digest_via_api(image, tag)
+        if remote_digest:
+            return remote_digest
+
+        # Fallback to docker CLI if API failed
+        logger.info("API digest check failed, falling back to docker CLI...")
         remote_digest = self.docker.get_remote_image_digest(image, tag)
         if remote_digest:
             return remote_digest
 
-        # If that failed, try with fresh authentication
-        logger.info("Digest check failed, trying with fresh authentication...")
+        # If that also failed, try with fresh authentication
+        logger.info("Docker digest check failed, trying with fresh authentication...")
         if self._ensure_registry_auth():
             return self.docker.get_remote_image_digest(image, tag)
 
@@ -136,7 +174,9 @@ class Updater:
 
     def check_device_update(self) -> str | None:
         """
-        Check if beachvar-device needs update using docker manifest inspect.
+        Check if beachvar-device needs update.
+
+        Uses HTTP API to ghcr.io (falls back to docker CLI if needed).
 
         Returns:
             New digest if update is available, None otherwise
@@ -156,7 +196,9 @@ class Updater:
 
     def check_agent_update(self) -> str | None:
         """
-        Check if beachvar-agent needs update using docker manifest inspect.
+        Check if beachvar-agent needs update.
+
+        Uses HTTP API to ghcr.io (falls back to docker CLI if needed).
 
         Returns:
             New digest if update is available, None otherwise

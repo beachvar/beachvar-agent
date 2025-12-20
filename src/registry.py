@@ -98,7 +98,8 @@ class RegistryClient:
         url = f"https://{self.registry}/v2/{image}/manifests/{tag}"
         headers = {
             "Authorization": f"Bearer {bearer_token}",
-            "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+            # Accept both manifest list (multi-arch) and single manifest formats
+            "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json",
         }
 
         try:
