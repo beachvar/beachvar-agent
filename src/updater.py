@@ -348,21 +348,24 @@ class Updater:
 
             logger.info("Bootstrap: Containers started successfully")
 
-        # Get current digests and save (using docker manifest inspect)
-        remote_device_digest = self.docker.get_remote_image_digest(DEVICE_IMAGE, "latest")
-        remote_agent_digest = self.docker.get_remote_image_digest(AGENT_IMAGE, "latest")
+        # Get current digests and save (using HTTP API for consistency)
+        # Only update versions if not already set by update_device/update_agent
+        if not self.versions.get("device"):
+            remote_device_digest = self._get_remote_digest_via_api(DEVICE_IMAGE, "latest")
+            if remote_device_digest:
+                self.versions["device"] = remote_device_digest
 
-        if remote_device_digest:
-            self.versions["device"] = remote_device_digest
-        if remote_agent_digest:
-            self.versions["agent"] = remote_agent_digest
+        if not self.versions.get("agent"):
+            remote_agent_digest = self._get_remote_digest_via_api(AGENT_IMAGE, "latest")
+            if remote_agent_digest:
+                self.versions["agent"] = remote_agent_digest
 
         self._save_versions()
 
         # Report versions to backend
         self.backend.report_version(
-            device_version=remote_device_digest,
-            agent_version=remote_agent_digest,
+            device_version=self.versions.get("device"),
+            agent_version=self.versions.get("agent"),
         )
 
         logger.info("=== Bootstrap complete ===")
