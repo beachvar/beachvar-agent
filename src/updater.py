@@ -339,7 +339,7 @@ class Updater:
                 if not self._pull_with_fallback(DEVICE_IMAGE, "latest"):
                     logger.warning("Bootstrap: Failed to pull device image, will try to start anyway")
 
-            # Start all containers via Docker API (device, cloudflared, ttyd)
+            # Start all containers via Docker API (device, ttyd, glances)
             # Using detached mode to avoid issues if agent gets recreated
             logger.info("Bootstrap: Starting containers via Docker API...")
             if not self.docker.compose_up_detached(self.compose_file):
@@ -386,8 +386,8 @@ class Updater:
         containers_to_start = []
         container_checks = [
             ("beachvar-device", "device"),
-            ("beachvar-cloudflared", "cloudflared"),
             ("beachvar-ttyd", "ttyd"),
+            ("beachvar-glances", "glances"),
         ]
 
         for container_name, service_name in container_checks:

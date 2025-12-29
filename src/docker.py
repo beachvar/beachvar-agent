@@ -275,7 +275,7 @@ class DockerClient:
 
         Args:
             compose_file: Path to docker-compose.yml
-            command: The compose command to run (e.g., "up -d device cloudflared ttyd")
+            command: The compose command to run (e.g., "up -d device ttyd glances")
             container_name: Name for the helper container
 
         Returns:
@@ -399,7 +399,7 @@ class DockerClient:
             command = f"up -d {force_flag}{services_str}"
         else:
             # Start all services including agent (for self-updates)
-            command = f"up -d {force_flag}agent device cloudflared ttyd"
+            command = f"up -d {force_flag}agent device ttyd glances"
 
         logger.info(f"Starting services via Docker API: {command}")
         return self._run_compose_via_docker_api(
