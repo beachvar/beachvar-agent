@@ -145,7 +145,13 @@ class Updater:
 
     def _get_remote_digest_with_auth_fallback(self, image: str, tag: str = "latest") -> str | None:
         """
-        Get remote image digest, trying API first, then falling back to docker CLI.
+        Get remote image digest using the registry HTTP API.
+
+        Only uses the HTTP API to ensure consistent digest format (manifest index digest).
+        Docker CLI methods return platform-specific manifest digests which differ from the
+        API's Docker-Content-Digest header, causing update loops.
+
+        If the API fails, retries with fresh authentication before giving up.
 
         Args:
             image: Image name
@@ -154,22 +160,19 @@ class Updater:
         Returns:
             Image digest or None if failed
         """
-        # Try via HTTP API first (faster and more reliable)
+        # Try via HTTP API (only method that returns consistent digests)
         remote_digest = self._get_remote_digest_via_api(image, tag)
         if remote_digest:
             return remote_digest
 
-        # Fallback to docker CLI if API failed
-        logger.info("API digest check failed, falling back to docker CLI...")
-        remote_digest = self.docker.get_remote_image_digest(image, tag)
+        # API failed - retry with fresh authentication
+        logger.warning("API digest check failed, retrying with fresh auth...")
+        self._auth_setup_done = False
+        remote_digest = self._get_remote_digest_via_api(image, tag)
         if remote_digest:
             return remote_digest
 
-        # If that also failed, try with fresh authentication
-        logger.info("Docker digest check failed, trying with fresh authentication...")
-        if self._ensure_registry_auth():
-            return self.docker.get_remote_image_digest(image, tag)
-
+        logger.warning(f"Could not get digest for {image}:{tag}, skipping check")
         return None
 
     def check_device_update(self) -> str | None:
