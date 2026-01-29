@@ -4,7 +4,6 @@ Docker operations for BeachVar Agent.
 Provides Docker and Docker Compose management functions.
 """
 
-import hashlib
 import json
 import logging
 import subprocess
@@ -579,18 +578,25 @@ class DockerClient:
         """
         try:
             # Use docker buildx imagetools inspect - no cache issues
+            # We don't use --raw because hashing the raw manifest gives a different
+            # digest than the registry's Docker-Content-Digest header, which causes
+            # update loops when alternating between API and CLI methods.
             result = subprocess.run(
-                ["docker", "buildx", "imagetools", "inspect", f"{image}:{tag}", "--raw"],
+                ["docker", "buildx", "imagetools", "inspect", f"{image}:{tag}"],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
             if result.returncode == 0:
-                # The raw output is the manifest itself - hash it to get digest
-                manifest_content = result.stdout.strip()
-                digest = "sha256:" + hashlib.sha256(manifest_content.encode()).hexdigest()
-                logger.debug(f"Remote digest for {image}:{tag}: {digest}")
-                return digest
+                # Parse the Digest field from the output
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if line.startswith("Digest:"):
+                        digest = line.split("Digest:", 1)[1].strip()
+                        if digest.startswith("sha256:"):
+                            logger.debug(f"Remote digest for {image}:{tag}: {digest}")
+                            return digest
+                logger.warning(f"Could not parse digest from buildx output for {image}:{tag}")
             else:
                 # Fallback to docker manifest inspect if buildx not available
                 logger.debug(f"Buildx failed, trying manifest inspect: {result.stderr.strip()}")
